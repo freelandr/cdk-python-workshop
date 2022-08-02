@@ -1,0 +1,19 @@
+RulesToSuppress:
+- id: W28
+  reason: not applicable to this workshop
+- id: W28
+  reason: not applicable to this workshop
+- id: W68
+  reason: not applicable to this workshop
+- id: W59
+  reason: not applicable to this workshop
+- id: W69
+  reason: not applicable to this workshop
+- id: W64
+  reason: not applicable to this workshop
+- id: W58
+  reason: not applicable to this workshop
+- id: W89
+  reason: not applicable to this workshop
+- id: W92
+  reason: not applicable to this workshop
