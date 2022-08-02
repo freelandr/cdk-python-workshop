@@ -1,65 +1,249 @@
+# Workshop: Building CI/CD pipelines for lambda canary deployments using AWS CDK
 
-# Welcome to your CDK Python project!
+(https://catalog.us-east-1.prod.workshops.aws/workshops/5195ab7c-5ded-4ee2-a1c5-775300717f42/en-US)
 
-You should explore the contents of this project. It demonstrates a CDK app with an instance of a stack (`cdk_workshop_stack`)
-which contains an Amazon SQS queue that is subscribed to an Amazon SNS topic.
+(https://github.com/freelandr/cdk-python-workshop)
 
-The `cdk.json` file tells the CDK Toolkit how to execute your app.
+## App
 
-This project is set up like a standard Python project.  The initialization process also creates
-a virtualenv within this project, stored under the .venv directory.  To create the virtualenv
-it assumes that there is a `python3` executable in your path with access to the `venv` package.
-If for any reason the automatic creation of the virtualenv fails, you can create the virtualenv
-manually once the init process completes.
+API Gateway ---> Lambda
 
-To manually create a virtualenv on MacOS and Linux:
+## Pipeline
 
-```
-$ python3 -m venv .venv
-```
-
-After the init process completes and the virtualenv is created, you can use the following
-step to activate your virtualenv.
+CodeCommit ---> git clone ---> cdk bootstrap ---> S3 (cdk artifacts)
+							   cdk deploy    ---> AWS Service Stack
+							   
+## Create cdk project
 
 ```
+$ mkdir cdk_workshop && cd cdk_workshop							   
+$ cdk init sample-app --language python						# automatically creates a venv
 $ source .venv/bin/activate
+$ python -m pip3 install --upgrade pip
+$ pip3 install -r requirements.txt
 ```
 
-If you are a Windows platform, you would activate the virtualenv like this:
+The sample app just creates an SQS queue and an SNS topic
+see cdk-workshop/cdk_workshop/cdk_workshop_stack.py
+
+Modify cdk_workshop_stack.py (this is where most of the code will go)...
+
+##Define lamba function
 
 ```
-% .venv\Scripts\activate.bat
+
+        my_lambda = Function(
+            scope = self,
+            id = "MyFunction",
+            function_name= context["lambda"]["name"],
+            handler = "handler.lambda_handler",
+            runtime = Runtime.PYTHON_3_9,
+            code = Code.from_asset("lambda"),
+            current_version_options = VersionOptions(
+                description = f'Version deployed on {current_date}',
+                removal_policy = RemovalPolicy.RETAIN
+            )
+        )
+```
+		
+###Define API gateway
+
+```
+        LambdaRestApi(
+            scope = self,
+            id = "RestAPI",
+            handler = alias,
+            deploy_options = StageOptions(stage_name=self.stage_name)
+        )		
+```
+		
+## And a deployment group
+
+```
+        LambdaDeploymentGroup(
+            scope = self,
+            id = "CanaryDeployment",
+            alias = alias,
+            deployment_config = LambdaDeploymentConfig.CANARY_10_PERCENT_5_MINUTES,
+            alarms = [failure_alarm]
+        )		
+```
+		
+## Then create the lambda source file (linked from your function definition above)
+
+```
+lambda/handler.py
+
+import json
+
+def lambda_handler(event, context):
+    return {
+        'statusCode': 200,
+        'body': json.dumps('Hello from CDK!')
+    }
 ```
 
-Once the virtualenv is activated, you can install the required dependencies.
+## Add config to /cdk.json
 
 ```
-$ pip install -r requirements.txt
+# use this file to set up variables for different environments (qa and prod)
+
+  "context": {
+    "prefix": "cdk-workshop-stack",
+    "qa": {
+      "region": "us-east-1",
+      "lambda": {
+        "name": "cdk-workshop-function-qa",
+        "alias": "live",
+        "stage": "qa"
+      },
+      "tags": {
+        "App":"cdk-workshop",
+        "Environment": "QA",
+        "IaC": "CDK"
+      }
+    },
+    "prod": {
+
+    }
+  }	
+```
+  
+can access this information in the code...
+
+```
+        environment_type = self.node.try_get_context("environmentType")
+        context = self.node.try_get_context(environment_type)
+        self.alias_name = context["lambda"]["alias"]						# live
+        self.stage_name = context["lambda"]["stage"]						# qa
+		
+		function_name= context["lambda"]["name"]							# cdk-workshop-function-qa
+
+```
+		
+note that environmentType gets passed to the bootstrap command as an argument later...
+
+cdk.json also defines how to run the app:
+
+```
+	"app": "python3 app.py",
 ```
 
-At this point you can now synthesize the CloudFormation template for this code.
+## Bootstrap the app
+
+Only need to do this once		
+
+```		
+$ export AWS_DEFAULT_PROFILE=default		
+$ export REGION=us-east-1
+$ export PROFILE=default
+$ export ACCOUNT=$(aws sts get-caller-identity --profile $PROFILE | jq -r .Account)
+$ cdk bootstrap aws://$ACCOUNT/$REGION -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE	
+```
+
+(had to create new creds for admin)	
+
+## Synth the app
 
 ```
-$ cdk synth
+$ cdk synth -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE
 ```
 
-You can now begin exploring the source code, contained in the hello directory.
-There is also a very trivial test included that can be run like this:
+this executes the code
+
+--> CloudFormation artifacts written to JSON files in ...
+	/cdk.out/...
+	
+can also redirect to yaml:
 
 ```
-$ pytest
+$ cdk synth -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE >> template.yaml
 ```
 
-To add additional dependencies, for example other CDK libraries, just add to
-your requirements.txt file and rerun the `pip install -r requirements.txt`
-command.
+then use cfn_nag to check for any bad practices in the generated template (see further down)
 
-## Useful commands
+(https://github.com/stelligent/cfn_nag)
 
- * `cdk ls`          list all stacks in the app
- * `cdk synth`       emits the synthesized CloudFormation template
- * `cdk deploy`      deploy this stack to your default AWS account/region
- * `cdk diff`        compare deployed stack with current state
- * `cdk docs`        open CDK documentation
+## Deploy the app
 
-Enjoy!
+```
+$ cdk deploy -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE
+```
+
+## Clean up
+
+```
+$ cdk destroy -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE
+```
+
+## Unit Testing & Linting
+
+use cdk assertions (https://docs.aws.amazon.com/cdk/api/v2/docs/aws-cdk-lib.assertions-readme.html)
+to check that the generated CloudFormation template is as expected
+
+Fine-grained assertions: test specific aspects of the generated AWS CloudFormation template, such as "this resource has this property with this value."
+
+add libraries to requirements.txt...
+
+```
+pytest
+coverage
+pylint
+safety
+```
+
+add tests to tests/unit/test_...py
+
+run:
+```
+$ python -m pytest									# should discover the tests automatically
+```
+
+check code coverage:
+```
+$ python -m coverage run --branch --source=cdk_workshop -m pytest
+```
+
+check linting:
+```
+$ python -m pylint cdk_workshop
+```
+
+check for libraries with known vulnerabilities:
+```
+$ safety check
+```
+
+## Using Cfn_Nag to check for bad practices in generated CloudFormation template
+
+```
+$ cdk synth -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE >> template.yaml
+
+$ cat <<EOF>> cfn_nag_supress.yaml
+RulesToSuppress:
+- id: W28
+  reason: not applicable to this workshop
+- id: W28
+  reason: not applicable to this workshop
+- id: W68
+  reason: not applicable to this workshop
+- id: W59
+  reason: not applicable to this workshop
+- id: W69
+  reason: not applicable to this workshop
+- id: W64
+  reason: not applicable to this workshop
+- id: W58
+  reason: not applicable to this workshop
+- id: W89
+  reason: not applicable to this workshop
+- id: W92
+  reason: not applicable to this workshop
+EOF
+
+# install
+$ gem install cfn-nag
+
+# run
+$ cfn_nag_scan --input-path template.yaml --deny-list-path cfn_nag_supress.yaml
+```
