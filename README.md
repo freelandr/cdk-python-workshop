@@ -1,8 +1,6 @@
-# Workshop: Building CI/CD pipelines for lambda canary deployments using AWS CDK
+# Building CI/CD pipelines for lambda canary deployments using AWS CDK with Python
 
 (https://catalog.us-east-1.prod.workshops.aws/workshops/5195ab7c-5ded-4ee2-a1c5-775300717f42/en-US)
-
-(https://github.com/freelandr/cdk-python-workshop)
 
 ## App
 
@@ -28,7 +26,7 @@ see cdk-workshop/cdk_workshop/cdk_workshop_stack.py
 
 Modify cdk_workshop_stack.py (this is where most of the code will go)...
 
-##Define lamba function
+## Define lamba function
 
 ```
 
@@ -46,7 +44,7 @@ Modify cdk_workshop_stack.py (this is where most of the code will go)...
         )
 ```
 		
-###Define API gateway
+## Define API gateway
 
 ```
         LambdaRestApi(
