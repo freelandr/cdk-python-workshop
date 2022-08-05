@@ -3,7 +3,7 @@ phases:
   install:
     runtime-versions:
       python: 3.8
-      nodejs: 12
+      nodejs: 16
     commands:
       - npm install -g aws-cdk
       - cdk --version
@@ -13,7 +13,7 @@ phases:
       - pip3 install -r requirements.txt
   pre_build:
     commands:
-      - ACCOUNT=675115824335
+      - ACCOUNT=$(aws sts get-caller-identity | jq -r '.Account')
   build:
     commands:
-      - cdk deploy -c account= -c environmentType=qa --require-approval never
+      - cdk deploy -c account=$ACCOUNT -c environmentType=qa --require-approval never
