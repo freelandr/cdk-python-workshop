@@ -245,3 +245,95 @@ $ gem install cfn-nag
 # run
 $ cfn_nag_scan --input-path template.yaml --deny-list-path cfn_nag_supress.yaml
 ```
+## Using CodeBuild to build the stack
+
+Create a buildspec in the project root
+
+```
+$ cat <<EOF >> buildspec.yml
+version: 0.2
+phases:
+  install:
+    runtime-versions:
+      python: 3.8
+      nodejs: 12
+    commands:
+      - npm install -g aws-cdk
+      - cdk --version
+      - python3 -m venv .env
+      - chmod +x .env/bin/activate
+      - . .env/bin/activate
+      - pip3 install -r requirements.txt
+  pre_build:
+    commands:
+      - ACCOUNT=$(aws sts get-caller-identity | jq -r '.Account')
+  build:
+    commands:
+      - cdk deploy -c account=$ACCOUNT -c environmentType=qa --require-approval never
+EOF
+```
+
+## Creating a CodePipeline in CDK
+
+Then create a new project for the pipeline:
+
+```
+$ cd ..
+$ mkdir cdk-workshop-pipeline && cd cdk-workshop-p*
+$ cdk init sample-app --language python
+$ source .venv/bin/activate
+$ pip3 install --upgrade pip
+$ pip3 install -r requirements.txt
+```
+
+In cdk_workshop_pipeline:
+
+Create a GitHubSourceAction:
+
+```
+		# Source stage
+        self.source_stage.add_action(
+            GitHubSourceAction(
+                action_name = "GitHub_source",
+                output = source_output,
+                owner = self.context["github"]["owner"],
+                repo = self.context["github"]["repositoryName"],
+                oauthToken = SecretValue.secretsManager(self.context["github"]["oauthSecretName"]),
+                branch = "main"
+            )
+        )
+```
+
+Source the repo details from cdk.json:
+
+```
+{
+  "app": "python3 app.py",
+  "context": {
+    "qa": {
+      "region": "us-east-1",
+      "pipeline": {
+        "buildSpecLocation": "buildspec.yml",
+        "bucketName": "cdk-workshop-assets",
+        "targetStack": "cdk-workshop-stack-qa" 
+      },
+      "github": {
+        "repositoryName": "cdk-python-workshop",
+        "owner": "freelandr",
+        "oauthSecretName": "github-oauth-token"
+      }
+    }
+  }
+}
+```
+
+Add the other stages:
+- code validation:
+ - pylint, unit test, etc
+- build (to use the buildspec.yml file from main project which includes the deploy command)
+
+Finally, deploy the pipeline:
+
+```
+$ cdk deploy -c account=$ACCOUNT -c environmentType=qa --profile $PROFILE
+```
